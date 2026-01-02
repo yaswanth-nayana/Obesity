@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import plotly.express as px
-import plotly.graph_objects as go
 import os
 import warnings
 warnings.filterwarnings('ignore')
@@ -49,14 +47,96 @@ st.markdown("""
         color: white;
         font-weight: bold;
     }
+    .metric-card {
+        background-color: #F8F9FA;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+        border-left: 4px solid #1E3A8A;
+    }
+    .feature-bar {
+        height: 20px;
+        background-color: #E5E7EB;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        overflow: hidden;
+    }
+    .feature-fill {
+        height: 100%;
+        background-color: #1E3A8A;
+        border-radius: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# Function to automatically load model
+def load_model_automatically():
+    """Try to load model automatically on app start"""
+    try:
+        # First try model_package.pkl
+        if os.path.exists('model_package.pkl'):
+            with open('model_package.pkl', 'rb') as f:
+                model_data = pickle.load(f)
+            
+            if isinstance(model_data, dict) and 'model' in model_data:
+                st.session_state.model_data = model_data
+                st.session_state.model_loaded = True
+                return True, "Model package loaded successfully"
+        
+        # If model_package.pkl doesn't exist, try other common names
+        pkl_files = [f for f in os.listdir('.') if f.endswith('.pkl')]
+        
+        for pkl_file in pkl_files:
+            try:
+                with open(pkl_file, 'rb') as f:
+                    content = pickle.load(f)
+                
+                # Check if it's a scikit-learn model or our model package
+                if hasattr(content, 'predict'):  # It's a scikit-learn model
+                    st.session_state.model_data = {
+                        'model': content,
+                        'scaler': None,
+                        'top_features': None,
+                        'label_encoders': {}
+                    }
+                    st.session_state.model_loaded = True
+                    return True, f"Model loaded from {pkl_file}"
+                
+                elif isinstance(content, dict) and 'model' in content:  # It's our model package
+                    st.session_state.model_data = content
+                    st.session_state.model_loaded = True
+                    return True, f"Model package loaded from {pkl_file}"
+                    
+            except:
+                continue
+        
+        return False, "No valid model file found"
+        
+    except Exception as e:
+        return False, f"Error loading model: {str(e)}"
 
 # Initialize session state
 if 'model_loaded' not in st.session_state:
     st.session_state.model_loaded = False
+    st.session_state.model_load_message = ""
+    
+    # Try to load model automatically
+    success, message = load_model_automatically()
+    st.session_state.model_load_message = message
+    if not success:
+        st.session_state.model_loaded = False
+
 if 'model_data' not in st.session_state:
     st.session_state.model_data = None
+
+if 'prediction_made' not in st.session_state:
+    st.session_state.prediction_made = False
+
+if 'user_data' not in st.session_state:
+    st.session_state.user_data = {}
+
+if 'prediction_result' not in st.session_state:
+    st.session_state.prediction_result = None
 
 # App title and description
 st.markdown('<h1 class="main-header">⚖️ Obesity Level Prediction System</h1>', unsafe_allow_html=True)
@@ -66,57 +146,59 @@ This application uses machine learning to predict obesity levels based on lifest
 Enter your information below to get a prediction and personalized insights.
 """)
 
-# Sidebar for model loading and information
+# Sidebar for model information and controls
 with st.sidebar:
     st.header("🔧 Model Configuration")
     
-    # File selection for loading model
-    st.subheader("Load Model Files")
+    # Auto-load status
+    if st.session_state.model_loaded:
+        st.success("✅ Model loaded automatically!")
+        if st.session_state.model_load_message:
+            st.info(f"*{st.session_state.model_load_message}*")
+    else:
+        st.error("❌ Model not loaded")
+        if st.session_state.model_load_message:
+            st.error(f"*{st.session_state.model_load_message}*")
     
-    # Check if files exist
-    pkg_exists = os.path.exists('model_package.pkl')
-    model_exists = os.path.exists('best_model.pkl')
+    # Manual load option
+    st.subheader("Manual Load Options")
     
-    if not pkg_exists:
-        st.error("❌ model_package.pkl not found in current directory!")
-    if not model_exists:
-        st.warning("⚠️ best_model.pkl not found in current directory!")
+    if st.button("🔄 Try Manual Load", use_container_width=True):
+        success, message = load_model_automatically()
+        if success:
+            st.success(f"✅ {message}")
+            st.rerun()
+        else:
+            st.error(f"❌ {message}")
     
-    # Load model button
-    if st.button("🔄 Load Models", type="primary", use_container_width=True):
+    # File selector for manual upload
+    st.subheader("Upload Model File")
+    uploaded_file = st.file_uploader("Choose a .pkl file", type="pkl")
+    
+    if uploaded_file is not None:
         try:
-            # Load model package first
-            if pkg_exists:
-                with open('model_package.pkl', 'rb') as f:
-                    model_data = pickle.load(f)
-                
-                # Verify it's a valid pickle file
-                if isinstance(model_data, dict) and 'model' in model_data:
-                    st.session_state.model_data = model_data
-                    st.session_state.model_loaded = True
-                    st.success("✅ Model package loaded successfully!")
-                    
-                    # Also try to load standalone model
-                    if model_exists:
-                        try:
-                            with open('best_model.pkl', 'rb') as f:
-                                standalone_model = pickle.load(f)
-                            st.info(f"✓ Both pickle files loaded successfully")
-                        except:
-                            st.warning("Standalone model file may be corrupted")
-                else:
-                    st.error("Invalid model package format!")
+            model_data = pickle.load(uploaded_file)
+            
+            if isinstance(model_data, dict) and 'model' in model_data:
+                st.session_state.model_data = model_data
+                st.session_state.model_loaded = True
+                st.success("✅ Model uploaded successfully!")
+                st.rerun()
+            elif hasattr(model_data, 'predict'):  # It's a scikit-learn model
+                st.session_state.model_data = {
+                    'model': model_data,
+                    'scaler': None,
+                    'top_features': None,
+                    'label_encoders': {}
+                }
+                st.session_state.model_loaded = True
+                st.success("✅ Scikit-learn model uploaded successfully!")
+                st.rerun()
             else:
-                st.error("model_package.pkl file not found!")
+                st.error("Invalid model format!")
                 
         except Exception as e:
-            st.error(f"❌ Failed to load model: {str(e)}")
-            st.info("""
-            **Possible causes:**
-            1. File is corrupted or empty
-            2. File contains text instead of binary data
-            3. Wrong file format
-            """)
+            st.error(f"Failed to load model: {str(e)}")
     
     st.divider()
     
@@ -126,78 +208,94 @@ with st.sidebar:
         st.header("📊 Model Information")
         
         st.info(f"**Model Type:** {type(model_data['model']).__name__}")
-        st.info(f"**Features Used:** {len(model_data['top_features'])}")
         
-        with st.expander("View Selected Features"):
-            for i, feature in enumerate(model_data['top_features'], 1):
-                st.write(f"{i}. {feature}")
+        if model_data['top_features']:
+            st.info(f"**Features Used:** {len(model_data['top_features'])}")
+            with st.expander("View Selected Features"):
+                for i, feature in enumerate(model_data['top_features'], 1):
+                    st.write(f"{i}. {feature}")
         
-        st.info(f"**Scaler:** {type(model_data['scaler']).__name__}")
-        st.info(f"**Label Encoders:** {len(model_data.get('label_encoders', {}))}")
+        if model_data['scaler']:
+            st.info(f"**Scaler:** {type(model_data['scaler']).__name__}")
+        
+        if model_data.get('label_encoders'):
+            st.info(f"**Label Encoders:** {len(model_data['label_encoders'])}")
     
     st.divider()
     
-    # Troubleshooting section
-    st.header("🛠️ Troubleshooting")
+    # Help section
+    st.header("❓ Help")
     st.markdown("""
-    If models fail to load:
-    1. **Run your training script again** to regenerate pickle files
-    2. **Check file sizes:**
-       - model_package.pkl should be > 1KB
-       - best_model.pkl should be > 1KB
-    3. **Try loading manually:**
-    ```python
-    import pickle
-    with open('model_package.pkl', 'rb') as f:
-        data = pickle.load(f)
-    print(type(data))
-    ```
+    **Common Issues:**
+    1. **No model file found** - Make sure you have a .pkl file in the app directory
+    2. **Invalid model format** - Model should be a pickle file containing:
+        - A trained model (scikit-learn compatible)
+        - Optional: scaler, feature list, label encoders
+    3. **Corrupted file** - Try regenerating the model file
+    
+    **Supported files:**
+    - `model_package.pkl` (preferred)
+    - Any .pkl file with a scikit-learn model
+    - Any .pkl file with our model package format
     """)
 
 # Main content area
 if not st.session_state.model_loaded:
-    # Show warning if model not loaded
+    # Show model not loaded state
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.warning("""
         ## ⚠️ Models Not Loaded
         
-        Please click **"Load Models"** in the sidebar to load your trained models.
+        The app could not automatically load a trained model.
         
-        **Required files in current directory:**
-        1. `model_package.pkl` - Main model package (required)
-        2. `best_model.pkl` - Standalone model (optional)
-        """)
+        **To fix this:**
+        
+        1. **Place a model file in the app directory:**
+           - `model_package.pkl` (preferred)
+           - Any `.pkl` file with a trained scikit-learn model
+        
+        2. **Or upload a model file** using the sidebar
+        
+        3. **Available options in sidebar:**
+           - Try manual load again
+           - Upload a model file directly
+        
+        **Current directory files:**""")
         
         # Show current directory files
-        with st.expander("Check Current Directory Files"):
-            try:
-                files = os.listdir('.')
-                pkl_files = [f for f in files if f.endswith('.pkl')]
-                if pkl_files:
-                    st.write("Found pickle files:", pkl_files)
-                    for file in pkl_files:
+        try:
+            files = os.listdir('.')
+            if files:
+                st.write("```")
+                for file in files:
+                    if file.endswith('.pkl'):
                         size = os.path.getsize(file)
-                        st.write(f"- {file}: {size} bytes")
-                else:
-                    st.write("No .pkl files found in current directory")
-            except:
-                st.write("Could not read directory")
+                        st.write(f"📁 {file:30} ({size:,} bytes)")
+                    else:
+                        st.write(f"📄 {file}")
+                st.write("```")
+            else:
+                st.write("No files found in current directory")
+        except Exception as e:
+            st.write(f"Could not read directory: {e}")
+        
+        # Quick refresh button
+        if st.button("🔄 Refresh and Check Again", type="primary", use_container_width=True):
+            success, message = load_model_automatically()
+            if success:
+                st.success(f"✅ {message}")
+                st.rerun()
+            else:
+                st.error(f"❌ {message}")
+
 else:
     # Model is loaded - show the prediction interface
     model_data = st.session_state.model_data
     model = model_data['model']
-    scaler = model_data['scaler']
-    top_features = model_data['top_features']
+    scaler = model_data.get('scaler')
+    top_features = model_data.get('top_features')
     label_encoders = model_data.get('label_encoders', {})
-    
-    # Initialize prediction session state
-    if 'prediction_made' not in st.session_state:
-        st.session_state.prediction_made = False
-    if 'user_data' not in st.session_state:
-        st.session_state.user_data = {}
-    if 'prediction_result' not in st.session_state:
-        st.session_state.prediction_result = None
     
     col1, col2 = st.columns([1, 1])
     
@@ -253,9 +351,22 @@ else:
             
             # Calculate BMI in real-time
             bmi = weight / (height ** 2)
-            st.metric("Your BMI", f"{bmi:.1f}", 
-                     delta="Healthy" if 18.5 <= bmi <= 24.9 else 
-                            "Underweight" if bmi < 18.5 else "Overweight")
+            bmi_category = (
+                'Underweight' if bmi < 18.5 else
+                'Normal weight' if bmi < 25 else
+                'Overweight' if bmi < 30 else
+                'Obesity Class I' if bmi < 35 else
+                'Obesity Class II' if bmi < 40 else
+                'Obesity Class III'
+            )
+            
+            st.markdown(f"""
+            <div class="metric-card">
+                <h4>Your BMI</h4>
+                <h2>{bmi:.1f}</h2>
+                <p><strong>Category:</strong> {bmi_category}</p>
+            </div>
+            """, unsafe_allow_html=True)
             
             st.divider()
             st.subheader("Family History & Habits")
@@ -402,16 +513,6 @@ else:
             st.session_state.user_data = user_data
             
             # Display BMI calculation
-            bmi = weight / (height ** 2)
-            bmi_category = (
-                'Underweight' if bmi < 18.5 else
-                'Normal weight' if bmi < 25 else
-                'Overweight' if bmi < 30 else
-                'Obesity Class I' if bmi < 35 else
-                'Obesity Class II' if bmi < 40 else
-                'Obesity Class III'
-            )
-            
             st.markdown(f"""
             <div class="prediction-box">
                 <h3>📈 Your BMI: {bmi:.1f}</h3>
@@ -421,10 +522,10 @@ else:
             """, unsafe_allow_html=True)
             
             try:
-                # Prepare data for prediction - FIXED SECTION
+                # Prepare data for prediction
                 prediction_data = {}
                 
-                # Encode categorical features
+                # Encode categorical features if encoders exist
                 for feature, value in user_data.items():
                     if feature in label_encoders:
                         try:
@@ -439,7 +540,7 @@ else:
                     else:
                         prediction_data[feature] = value
                 
-                # Define ALL original features (16 features) that the scaler expects
+                # Define ALL original features (16 features)
                 all_original_features = [
                     'Gender', 'Age', 'Height', 'Weight', 'family_history_with_overweight',
                     'FAVC', 'FCVC', 'NCP', 'CAEC', 'SMOKE', 'CH2O', 'SCC', 'FAF', 'TUE',
@@ -449,40 +550,49 @@ else:
                 # Create DataFrame with ALL 16 features
                 full_df = pd.DataFrame(columns=all_original_features)
                 
-                # Fill the DataFrame with our data (all features should be present)
+                # Fill the DataFrame with our data
                 for feature in all_original_features:
                     if feature in prediction_data:
                         full_df[feature] = [prediction_data[feature]]
                     else:
-                        # This shouldn't happen since we collected all features from user
-                        # But just in case, fill with default values
+                        # Default values if feature missing
                         if feature in ['Age', 'Height', 'Weight', 'FCVC', 'NCP', 'CH2O', 'FAF', 'TUE']:
-                            full_df[feature] = [0.0]  # Default for numerical
+                            full_df[feature] = [0.0]
                         else:
-                            full_df[feature] = [0]    # Default for categorical
+                            full_df[feature] = [0]
                 
-                # Scale ALL 16 features (as the scaler expects)
-                scaled_data = scaler.transform(full_df)
-                
-                # Now extract only the top 8 features for the model
-                if top_features:
-                    # Get indices of top features in the scaled data
-                    top_feature_indices = []
-                    for feature in top_features:
-                        if feature in all_original_features:
-                            idx = all_original_features.index(feature)
-                            top_feature_indices.append(idx)
-                    
-                    # Extract only the top features from scaled data
-                    if top_feature_indices:
-                        scaled_top_features = scaled_data[:, top_feature_indices]
-                    else:
-                        scaled_top_features = scaled_data
+                # Scale features if scaler exists
+                if scaler:
+                    try:
+                        scaled_data = scaler.transform(full_df)
+                    except:
+                        # If scaling fails, use original data
+                        scaled_data = full_df.values
                 else:
-                    scaled_top_features = scaled_data
+                    scaled_data = full_df.values
                 
-                # Make prediction using only top features
-                prediction = model.predict(scaled_top_features)[0]
+                # Use only top features if specified
+                if top_features and len(top_features) > 0:
+                    try:
+                        # Get indices of top features
+                        top_feature_indices = []
+                        for feature in top_features:
+                            if feature in all_original_features:
+                                idx = all_original_features.index(feature)
+                                top_feature_indices.append(idx)
+                        
+                        # Extract only top features
+                        if top_feature_indices:
+                            model_input = scaled_data[:, top_feature_indices]
+                        else:
+                            model_input = scaled_data
+                    except:
+                        model_input = scaled_data
+                else:
+                    model_input = scaled_data
+                
+                # Make prediction
+                prediction = model.predict(model_input)[0]
                 
                 # Decode prediction
                 prediction_label = f"Class {prediction}"
@@ -501,6 +611,18 @@ else:
                             6: "Obesity_Type_III"
                         }
                         prediction_label = obesity_classes.get(prediction, f"Class {prediction}")
+                else:
+                    # Fallback if no label encoder
+                    obesity_classes = {
+                        0: "Insufficient_Weight",
+                        1: "Normal_Weight",
+                        2: "Overweight_Level_I",
+                        3: "Overweight_Level_II",
+                        4: "Obesity_Type_I",
+                        5: "Obesity_Type_II",
+                        6: "Obesity_Type_III"
+                    }
+                    prediction_label = obesity_classes.get(prediction, f"Class {prediction}")
                 
                 # Store result
                 st.session_state.prediction_result = prediction_label
@@ -529,39 +651,32 @@ else:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Show feature importance insights
-                st.markdown('<h3 class="sub-header">💡 Key Influencing Factors</h3>', unsafe_allow_html=True)
+                # Show feature importance visualization
+                st.markdown('<h3 class="sub-header">📊 Key Metrics</h3>', unsafe_allow_html=True)
                 
-                # Create a simple visualization of important features
-                important_features = {
-                    'Weight': weight,
-                    'Height': height,
-                    'Age': age,
-                    'Physical Activity': faf,
-                    'Vegetable Consumption': fcvc,
-                    'Water Intake': ch2o
+                # Create simple bar visualization using HTML/CSS
+                important_metrics = {
+                    'Weight': min(weight / 150, 1.0),  # Normalize to 0-1
+                    'Age': min(age / 80, 1.0),
+                    'Physical Activity': faf / 3.0,
+                    'Vegetable Consumption': fcvc / 3.0,
+                    'Water Intake': ch2o / 3.0,
+                    'Technology Use': tue / 2.0
                 }
                 
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=list(important_features.keys()),
-                        y=list(important_features.values()),
-                        marker_color=['#1E3A8A', '#3B82F6', '#60A5FA', '#93C5FD', '#BFDBFE', '#DBEAFE'],
-                        text=[f"{v:.1f}" for v in important_features.values()],
-                        textposition='auto'
-                    )
-                ])
-                
-                fig.update_layout(
-                    title="Your Current Metrics",
-                    xaxis_title="Features",
-                    yaxis_title="Value",
-                    height=400,
-                    showlegend=False,
-                    template="plotly_white"
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
+                for metric, value in important_metrics.items():
+                    percentage = min(int(value * 100), 100)
+                    st.markdown(f"""
+                    <div style="margin: 0.5rem 0;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span><strong>{metric}</strong></span>
+                            <span>{percentage}%</span>
+                        </div>
+                        <div class="feature-bar">
+                            <div class="feature-fill" style="width: {percentage}%;"></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 # Recommendations based on prediction
                 st.markdown('<h3 class="sub-header">📋 Personalized Recommendations</h3>', unsafe_allow_html=True)
@@ -619,10 +734,15 @@ else:
                 
                 for i, rec in enumerate(rec_list, 1):
                     st.info(f"{i}. {rec}")
+                    
+                # Add a button to reset and make new prediction
+                if st.button("🔄 Make Another Prediction", use_container_width=True):
+                    st.session_state.prediction_made = False
+                    st.rerun()
             
             except Exception as e:
                 st.error(f"Prediction failed: {str(e)}")
-                st.code(f"Error details: {str(e)}", language="python")
+                st.code(f"Error details:\n{str(e)}", language="python")
         
         elif st.session_state.prediction_made:
             # Show previous prediction
@@ -680,9 +800,9 @@ st.markdown("""
 
 # Debug information (hidden by default)
 with st.expander("Debug Information"):
-    st.write("Session state:", st.session_state)
+    st.write("Session state keys:", list(st.session_state.keys()))
     if st.session_state.model_loaded:
         st.write("Model type:", type(model).__name__)
-        st.write("Top features:", top_features)
-        st.write("Scaler type:", type(scaler).__name__)
-        st.write("Number of features scaler expects:", scaler.n_features_in_)
+        if hasattr(model, 'feature_importances_'):
+            st.write("Model has feature importances")
+        st.write("Model loaded automatically:", st.session_state.model_load_message)
