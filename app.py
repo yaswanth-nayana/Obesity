@@ -6,7 +6,7 @@ import io
 
 # Set page configuration
 st.set_page_config(
-    page_title="Obesity Level Predictor",
+    page_title="Obesity Love Predictor",
     page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -541,3 +541,4 @@ st.markdown("""
     <p>📦 <strong>Model loaded from GitHub:</strong> yaswanth-nayana/Obesity</p>
 </div>
 """, unsafe_allow_html=True)
+
