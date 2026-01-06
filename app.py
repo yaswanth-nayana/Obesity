@@ -111,6 +111,9 @@ with st.sidebar:
             # Show features if available
             if 'top_features' in st.session_state.model_data and st.session_state.model_data['top_features']:
                 st.info(f"**Features:** {len(st.session_state.model_data['top_features'])}")
+                with st.expander("View Features"):
+                    for i, feature in enumerate(st.session_state.model_data['top_features'], 1):
+                        st.write(f"{i}. {feature}")
     else:
         st.error(f"❌ {st.session_state.model_message}")
         st.info("**Tried to load from:**")
@@ -208,11 +211,33 @@ else:
             
             col_e, col_f = st.columns(2)
             with col_e:
-                fcvc = st.slider("Vegetables", 1.0, 3.0, 2.0, 0.1)
+                fcvc = st.slider("Vegetable Consumption", 1.0, 3.0, 2.0, 0.1)
             with col_f:
-                ncp = st.slider("Main Meals", 1.0, 4.0, 3.0, 0.1)
+                ncp = st.slider("Number of Main Meals", 1.0, 4.0, 3.0, 0.1)
+            
+            # Additional features
+            st.subheader("Additional Habits")
+            col_g, col_h = st.columns(2)
+            with col_g:
+                caec = st.selectbox("Eating Between Meals", ["no", "Sometimes", "Frequently", "Always"])
+            with col_h:
+                calc = st.selectbox("Alcohol Consumption", ["no", "Sometimes", "Frequently", "Always"])
+            
+            col_i, col_j = st.columns(2)
+            with col_i:
+                smoke = st.selectbox("Smoking", ["yes", "no"])
+            with col_j:
+                scc = st.selectbox("Calorie Monitoring", ["yes", "no"])
+            
+            col_k, col_l = st.columns(2)
+            with col_k:
+                ch2o = st.slider("Water Intake (L)", 0.5, 3.0, 1.5, 0.1)
+            with col_l:
+                tue = st.slider("Technology Use (hrs)", 0.0, 2.0, 0.5, 0.1)
             
             faf = st.slider("Physical Activity", 0.0, 3.0, 1.0, 0.1)
+            
+            mtrans = st.selectbox("Transportation", ["Public_Transportation", "Automobile", "Walking", "Bike", "Motorbike"])
             
             submitted = st.form_submit_button("🔍 Predict Obesity Level", use_container_width=True)
     
@@ -220,56 +245,100 @@ else:
         if submitted:
             st.markdown('<h2>📊 Prediction Results</h2>', unsafe_allow_html=True)
             
-            # Prepare input data
-            input_data = {
-                'Gender': 0 if gender == "Male" else 1,
-                'Age': age,
-                'Height': height,
-                'Weight': weight,
-                'family_history_with_overweight': 1 if family_history == "yes" else 0,
-                'FAVC': 1 if favc == "yes" else 0,
-                'FCVC': fcvc,
-                'NCP': ncp,
-                'FAF': faf
-            }
-            
-            # Add default values for missing features
-            default_features = {
-                'CAEC': 0, 'SMOKE': 0, 'CH2O': 1.5, 'SCC': 0, 
-                'TUE': 0.5, 'CALC': 0, 'MTRANS': 0
-            }
-            input_data.update(default_features)
-            
             try:
-                # Create DataFrame
-                df = pd.DataFrame([input_data])
+                # Prepare ALL input data - ALL 16 features in correct order
+                # This is the EXACT order the model was trained with
+                input_data = {}
+                
+                # Map categorical values to numeric codes
+                gender_map = {"Male": 0, "Female": 1}
+                yes_no_map = {"yes": 1, "no": 0}
+                caec_map = {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3}
+                calc_map = {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3}
+                mtrans_map = {
+                    "Public_Transportation": 0, 
+                    "Automobile": 1, 
+                    "Walking": 2, 
+                    "Bike": 3, 
+                    "Motorbike": 4
+                }
+                
+                # Create feature dictionary - ALL 16 features in training order
+                # Based on the obesity dataset standard features
+                feature_dict = {
+                    'Gender': gender_map[gender],
+                    'Age': float(age),
+                    'Height': float(height),
+                    'Weight': float(weight),
+                    'family_history_with_overweight': yes_no_map[family_history],
+                    'FAVC': yes_no_map[favc],
+                    'FCVC': float(fcvc),
+                    'NCP': float(ncp),
+                    'CAEC': caec_map[caec],
+                    'SMOKE': yes_no_map[smoke],
+                    'CH2O': float(ch2o),
+                    'SCC': yes_no_map[scc],
+                    'FAF': float(faf),
+                    'TUE': float(tue),
+                    'CALC': calc_map[calc],
+                    'MTRANS': mtrans_map[mtrans]
+                }
+                
+                # Debug: Show what features we're sending
+                with st.expander("🔍 Debug: Input Features"):
+                    st.write("**Feature Values:**")
+                    for key, value in feature_dict.items():
+                        st.write(f"{key}: {value}")
+                
+                # Determine which features to use
+                if top_features and len(top_features) > 0:
+                    # Use only the top features that the model expects
+                    st.info(f"Using {len(top_features)} selected features")
+                    selected_features = top_features
+                else:
+                    # Use all 16 features
+                    selected_features = list(feature_dict.keys())
+                
+                # Create DataFrame with features in the EXACT order
+                # This is CRITICAL for matching training order
+                df = pd.DataFrame({feature: [feature_dict[feature]] for feature in selected_features})
+                
+                # Ensure columns are in the right order
+                df = df[selected_features]
                 
                 # Scale if scaler exists
                 if scaler:
-                    df_scaled = scaler.transform(df)
+                    try:
+                        df_scaled = scaler.transform(df)
+                        st.info("✅ Features scaled successfully")
+                    except Exception as scale_error:
+                        st.warning(f"⚠️ Scaling skipped: {str(scale_error)}")
+                        df_scaled = df.values
                 else:
                     df_scaled = df.values
                 
-                # Select features if specified
-                if top_features and len(top_features) > 0:
-                    # Get available features
-                    available_features = [f for f in top_features if f in df.columns]
-                    if available_features:
-                        X = df_scaled[:, [list(df.columns).index(f) for f in available_features]]
-                    else:
-                        X = df_scaled
-                else:
-                    X = df_scaled
+                # Debug: Show DataFrame shape and columns
+                with st.expander("🔍 Debug: Model Input"):
+                    st.write(f"**DataFrame shape:** {df.shape}")
+                    st.write(f"**Columns:** {list(df.columns)}")
+                    st.write(f"**First row values:** {df.values[0]}")
                 
                 # Make prediction
-                prediction = model.predict(X)[0]
+                with st.spinner("Making prediction..."):
+                    prediction = model.predict(df_scaled)[0]
                 
                 # Decode prediction
                 obesity_labels = [
-                    "Insufficient_Weight", "Normal_Weight", "Overweight_Level_I",
-                    "Overweight_Level_II", "Obesity_Type_I", "Obesity_Type_II", "Obesity_Type_III"
+                    "Insufficient_Weight", 
+                    "Normal_Weight", 
+                    "Overweight_Level_I",
+                    "Overweight_Level_II", 
+                    "Obesity_Type_I", 
+                    "Obesity_Type_II", 
+                    "Obesity_Type_III"
                 ]
                 
+                # Try to decode using label encoder
                 if 'NObeyesdad' in label_encoders:
                     try:
                         result = label_encoders['NObeyesdad'].inverse_transform([prediction])[0]
@@ -283,21 +352,27 @@ else:
                 <div class="prediction-box">
                     <h3>🎯 Predicted Obesity Level</h3>
                     <h1 style="text-align: center; color: #1E3A8A;">{result}</h1>
+                    <p style="text-align: center; color: #666;">
+                        Based on analysis of your lifestyle factors
+                    </p>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Simple metrics visualization
-                st.markdown('<h3>📈 Key Factors</h3>', unsafe_allow_html=True)
+                st.markdown('<h3>📈 Key Health Metrics</h3>', unsafe_allow_html=True)
                 
                 metrics = [
-                    ("Weight", weight / 150),
-                    ("Age", age / 80),
-                    ("Physical Activity", faf / 3),
-                    ("Vegetable Intake", fcvc / 3)
+                    ("BMI", bmi, 40),
+                    ("Age", age, 80),
+                    ("Physical Activity", faf, 3),
+                    ("Vegetable Intake", fcvc, 3),
+                    ("Water Intake", ch2o, 3)
                 ]
                 
-                for name, value in metrics:
-                    percent = min(int(value * 100), 100)
+                for name, value, max_val in metrics:
+                    percent = min(int((value / max_val) * 100), 100)
+                    bar_color = "#2ecc71" if percent < 70 else "#f39c12" if percent < 90 else "#e74c3c"
+                    
                     st.markdown(f"""
                     <div style="margin: 0.5rem 0;">
                         <div style="display: flex; justify-content: space-between;">
@@ -305,13 +380,14 @@ else:
                             <span>{percent}%</span>
                         </div>
                         <div class="feature-bar">
-                            <div class="feature-fill" style="width: {percent}%;"></div>
+                            <div class="feature-fill" style="width: {percent}%; background-color: {bar_color};"></div>
                         </div>
+                        <small>{value} / {max_val}</small>
                     </div>
                     """, unsafe_allow_html=True)
                 
                 # Simple recommendations
-                st.markdown('<h3>📋 Recommendations</h3>', unsafe_allow_html=True)
+                st.markdown('<h3>📋 Personalized Recommendations</h3>', unsafe_allow_html=True)
                 
                 if "Insufficient" in result:
                     st.info("1. Increase calorie intake with healthy foods\n2. Include strength training\n3. Eat regular meals")
@@ -322,21 +398,63 @@ else:
                 else:
                     st.error("1. Consult healthcare professional\n2. Structured exercise plan\n3. Dietary counseling")
                 
-                if st.button("🔄 New Prediction", use_container_width=True):
+                # Show feature importance if available
+                if hasattr(model, 'feature_importances_') and top_features:
+                    with st.expander("🔍 Most Important Features"):
+                        for i, (feature, importance) in enumerate(zip(top_features, model.feature_importances_)):
+                            importance_percent = int(importance * 1000)  # Scale for visibility
+                            st.markdown(f"""
+                            <div style="margin: 0.5rem 0;">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span>{feature}</span>
+                                    <span>{importance_percent}</span>
+                                </div>
+                                <div class="feature-bar">
+                                    <div class="feature-fill" style="width: {min(importance_percent, 100)}%;"></div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                
+                if st.button("🔄 Make Another Prediction", use_container_width=True):
                     st.session_state.prediction_made = False
                     st.rerun()
                     
             except Exception as e:
-                st.error(f"Prediction error: {str(e)}")
+                st.error(f"❌ Prediction error: {str(e)}")
+                
+                # Debug information
+                with st.expander("🔧 Technical Details"):
+                    st.write("**Error type:**", type(e).__name__)
+                    st.write("**Full error:**", str(e))
+                    
+                    if 'df' in locals():
+                        st.write("**DataFrame columns:**", list(df.columns))
+                        st.write("**DataFrame shape:**", df.shape)
+                    
+                    if top_features:
+                        st.write("**Expected features (top_features):**", top_features)
+                    
+                    # Check model's expected features
+                    if hasattr(model, 'feature_name_'):
+                        st.write("**Model's feature names:**", model.feature_name_)
+                    elif hasattr(model, 'feature_importances_'):
+                        st.write("**Model has feature importances**")
         
         else:
             # Placeholder before prediction
             st.markdown("""
             <div style="text-align: center; padding: 4rem 2rem; background-color: #F8F9FA; border-radius: 10px;">
-                <h3 style="color: #6B7280;">👈 Enter Information</h3>
-                <p>Fill out the form and click "Predict" to see results.</p>
+                <div style="font-size: 4rem; margin-bottom: 1rem;">⚖️</div>
+                <h3 style="color: #6B7280;">Ready for Prediction</h3>
+                <p>Fill out the form on the left and click <strong>"Predict Obesity Level"</strong></p>
+                <p style="color: #10B981; margin-top: 1rem;">
+                    <strong>✓ Model loaded successfully</strong>
+                </p>
+                <p><small>Features configured: {feature_count}</small></p>
             </div>
-            """, unsafe_allow_html=True)
+            """.format(
+                feature_count=len(top_features) if top_features else "All 16"
+            ), unsafe_allow_html=True)
 
 # Footer
 st.divider()
