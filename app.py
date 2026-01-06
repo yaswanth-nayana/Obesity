@@ -260,6 +260,7 @@ else:
                     "Motorbike": 4
                 }
                 
+                # Create input dictionary with ALL original feature names
                 input_data = {
                     'Gender': gender_map[gender],
                     'Age': float(age),
@@ -287,36 +288,108 @@ else:
                 elif top_features and len(top_features) > 0:
                     expected_features = list(top_features)
                 else:
+                    # Use all original feature names
                     expected_features = [
                         'Gender', 'Age', 'Height', 'Weight', 'family_history_with_overweight',
                         'FAVC', 'FCVC', 'NCP', 'CAEC', 'SMOKE', 'CH2O', 'SCC', 'FAF', 'TUE',
                         'CALC', 'MTRANS'
                     ]
                 
-                # Create DataFrame with correct feature order
-                df_data = {}
-                for feature in expected_features:
-                    if feature in input_data:
-                        df_data[feature] = [input_data[feature]]
-                    else:
-                        df_data[feature] = [0]
+                # Debug: Show what features we have and what model expects
+                st.info(f"**Input features prepared:** {len(input_data)}")
+                st.info(f"**Model expects features:** {len(expected_features)}")
                 
-                df = pd.DataFrame(df_data)
-                df = df[expected_features]  # Ensure correct order
-                
-                # Scale if scaler exists
+                # Create DataFrame with the EXACT feature names the scaler was trained with
+                # First, check if scaler has feature names attribute
                 if scaler:
-                    try:
-                        df_scaled = scaler.transform(df)
-                    except Exception as e:
-                        st.warning(f"⚠️ Scaling skipped: {e}")
-                        df_scaled = df.values
+                    # Try to get scaler's expected feature names
+                    if hasattr(scaler, 'feature_names_in_'):
+                        scaler_features = list(scaler.feature_names_in_)
+                        st.info(f"**Scaler expects:** {len(scaler_features)} features")
+                        
+                        # Create DataFrame with scaler's expected features
+                        df_data = {}
+                        for feature in scaler_features:
+                            if feature in input_data:
+                                df_data[feature] = [input_data[feature]]
+                            else:
+                                # If scaler expects a feature we don't have, use 0
+                                df_data[feature] = [0.0]
+                                st.warning(f"⚠️ Scaler expects '{feature}' but not in input. Using 0.")
+                        
+                        df_for_scaler = pd.DataFrame(df_data)
+                        df_for_scaler = df_for_scaler[scaler_features]  # Ensure correct order
+                        
+                        # Scale the data
+                        try:
+                            scaled_values = scaler.transform(df_for_scaler)
+                            st.success("✅ Data scaled successfully with scaler")
+                            
+                            # Now create DataFrame for model prediction
+                            df_data_model = {}
+                            for feature in expected_features:
+                                if feature in input_data:
+                                    df_data_model[feature] = [input_data[feature]]
+                                else:
+                                    df_data_model[feature] = [0]
+                            
+                            df_for_model = pd.DataFrame(df_data_model)
+                            df_for_model = df_for_model[expected_features]
+                            
+                            # Get the scaled values for the model features
+                            model_input = []
+                            for feature in expected_features:
+                                if feature in scaler_features:
+                                    idx = scaler_features.index(feature)
+                                    model_input.append(scaled_values[0][idx])
+                                else:
+                                    model_input.append(0)
+                            
+                            model_input = [model_input]
+                            
+                        except Exception as e:
+                            st.error(f"❌ Scaler transformation failed: {str(e)}")
+                            # Fallback to unscaled data
+                            df_data = {}
+                            for feature in expected_features:
+                                if feature in input_data:
+                                    df_data[feature] = [input_data[feature]]
+                                else:
+                                    df_data[feature] = [0]
+                            
+                            df_for_model = pd.DataFrame(df_data)
+                            df_for_model = df_for_model[expected_features]
+                            model_input = df_for_model.values
+                    else:
+                        # Scaler doesn't have feature_names_in_ attribute
+                        st.warning("⚠️ Scaler doesn't have feature names. Using unscaled data.")
+                        # Create DataFrame for model
+                        df_data = {}
+                        for feature in expected_features:
+                            if feature in input_data:
+                                df_data[feature] = [input_data[feature]]
+                            else:
+                                df_data[feature] = [0]
+                        
+                        df_for_model = pd.DataFrame(df_data)
+                        df_for_model = df_for_model[expected_features]
+                        model_input = df_for_model.values
                 else:
-                    df_scaled = df.values
+                    # No scaler, just create DataFrame for model
+                    df_data = {}
+                    for feature in expected_features:
+                        if feature in input_data:
+                            df_data[feature] = [input_data[feature]]
+                        else:
+                            df_data[feature] = [0]
+                    
+                    df_for_model = pd.DataFrame(df_data)
+                    df_for_model = df_for_model[expected_features]
+                    model_input = df_for_model.values
                 
                 # Make prediction
                 with st.spinner("Making prediction..."):
-                    prediction = model.predict(df_scaled)[0]
+                    prediction = model.predict(model_input)[0]
                 
                 # Decode prediction based on your value_counts
                 obesity_labels = [
@@ -461,12 +534,17 @@ else:
                     
             except Exception as e:
                 st.error(f"❌ Prediction error: {str(e)}")
-                st.write("**Debug Info:**")
-                st.write(f"Model type: {type(model).__name__}")
-                if hasattr(model, 'feature_name_'):
-                    st.write(f"Model feature names: {list(model.feature_name_)}")
-                if hasattr(model, 'feature_names_in_'):
-                    st.write(f"Model feature names in: {list(model.feature_names_in_)}")
+                
+                # Detailed debug information
+                with st.expander("🔧 Debug Details"):
+                    st.write("**Error:**", str(e))
+                    st.write("**Model type:**", type(model).__name__)
+                    if scaler:
+                        st.write("**Scaler type:**", type(scaler).__name__)
+                        if hasattr(scaler, 'feature_names_in_'):
+                            st.write("**Scaler features:**", list(scaler.feature_names_in_))
+                    st.write("**Input data keys:**", list(input_data.keys()))
+                    st.write("**Expected features:**", expected_features)
         
         elif st.session_state.prediction_made:
             # Show previous prediction
