@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import pickle
-import os
+import requests
+import io
 
 # Set page configuration
 st.set_page_config(
@@ -49,31 +50,43 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Simple model loading function
-def load_model_file(filename):
-    """Load a model from a pickle file"""
+# Function to load model from GitHub
+def load_model_from_github(model_url):
+    """Load model directly from GitHub URL"""
     try:
-        if os.path.exists(filename):
-            with open(filename, 'rb') as f:
-                model_data = pickle.load(f)
-            return model_data, True, f"Loaded from {filename}"
-        return None, False, f"File {filename} not found"
+        # Use raw GitHub URL
+        raw_url = model_url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
+        
+        # Download the file
+        response = requests.get(raw_url)
+        response.raise_for_status()  # Check for errors
+        
+        # Load pickle from bytes
+        model_data = pickle.load(io.BytesIO(response.content))
+        return model_data, True, f"Loaded from GitHub: {model_url}"
+        
     except Exception as e:
-        return None, False, f"Error loading {filename}: {str(e)}"
+        return None, False, f"Error loading from GitHub: {str(e)}"
 
 # Initialize session state
 if 'model_data' not in st.session_state:
-    # Try to load model_package.pkl first, then best_model.pkl
-    for model_file in ['model_package.pkl', 'best_model.pkl']:
-        model_data, success, message = load_model_file(model_file)
+    # Your GitHub model URLs
+    github_model_urls = [
+        "https://github.com/yaswanth-nayana/Obesity/blob/main/model_package.pkl",
+        "https://github.com/yaswanth-nayana/Obesity/blob/main/best_model.pkl"
+    ]
+    
+    # Try to load from GitHub
+    for model_url in github_model_urls:
+        model_data, success, message = load_model_from_github(model_url)
         if success:
             st.session_state.model_data = model_data
-            st.session_state.model_file = model_file
+            st.session_state.model_source = model_url
             st.session_state.model_message = message
             break
     else:
         st.session_state.model_data = None
-        st.session_state.model_message = "No model files found (tried model_package.pkl and best_model.pkl)"
+        st.session_state.model_message = "Could not load models from GitHub"
 
 if 'prediction_made' not in st.session_state:
     st.session_state.prediction_made = False
@@ -88,7 +101,7 @@ with st.sidebar:
     
     if st.session_state.model_data:
         st.success(f"✅ Model Loaded")
-        st.info(f"**Source:** {st.session_state.model_file}")
+        st.info(f"**Source:** GitHub Repository")
         
         # Show model type
         if isinstance(st.session_state.model_data, dict) and 'model' in st.session_state.model_data:
@@ -100,28 +113,15 @@ with st.sidebar:
                 st.info(f"**Features:** {len(st.session_state.model_data['top_features'])}")
     else:
         st.error(f"❌ {st.session_state.model_message}")
-        st.info("**Expected files:** model_package.pkl or best_model.pkl in app directory")
-        
-        # Show current directory files
-        st.subheader("📁 Current Files")
-        files = [f for f in os.listdir('.') if f.endswith('.pkl')]
-        if files:
-            for file in files:
-                size = os.path.getsize(file)
-                st.write(f"• {file} ({size:,} bytes)")
-        else:
-            st.write("No .pkl files found")
+        st.info("**Tried to load from:**")
+        st.write("• https://github.com/yaswanth-nayana/Obesity/blob/main/model_package.pkl")
+        st.write("• https://github.com/yaswanth-nayana/Obesity/blob/main/best_model.pkl")
     
-    # Manual reload button
-    if st.button("🔄 Reload Models", use_container_width=True):
-        for model_file in ['model_package.pkl', 'best_model.pkl']:
-            model_data, success, message = load_model_file(model_file)
-            if success:
-                st.session_state.model_data = model_data
-                st.session_state.model_file = model_file
-                st.session_state.model_message = message
-                st.rerun()
-                break
+    # Reload button
+    if st.button("🔄 Reload from GitHub", use_container_width=True):
+        # Clear session state and reload
+        st.session_state.model_data = None
+        st.rerun()
 
 # Main content area
 if not st.session_state.model_data:
@@ -129,21 +129,26 @@ if not st.session_state.model_data:
     st.warning("""
     ## ⚠️ Model Not Loaded
     
-    Place one of these files in your app directory:
+    The app is trying to load models directly from your GitHub repository.
     
-    1. **model_package.pkl** (preferred)
-    2. **best_model.pkl**
+    **Possible issues:**
+    1. GitHub URLs might not be accessible
+    2. Large file size (models are ~2.4MB)
+    3. Network connection issue
     
-    Then click **🔄 Reload Models** in the sidebar.
+    **Quick fixes:**
+    1. Wait a moment and click **🔄 Reload from GitHub** in sidebar
+    2. Make sure your GitHub repository is public
+    3. Try uploading the model file manually below
     """)
     
-    # Quick file upload option
-    with st.expander("📤 Upload Model File (Alternative)"):
+    # Manual upload as fallback
+    with st.expander("📤 Upload Model File (Fallback)"):
         uploaded_file = st.file_uploader("Choose a .pkl file", type="pkl")
         if uploaded_file is not None:
             try:
                 st.session_state.model_data = pickle.load(uploaded_file)
-                st.session_state.model_file = "Uploaded file"
+                st.session_state.model_source = "Uploaded file"
                 st.success("✅ Model uploaded successfully!")
                 st.rerun()
             except Exception as e:
@@ -338,5 +343,6 @@ st.divider()
 st.markdown("""
 <div style="text-align: center; color: #6B7280; font-size: 0.9rem;">
     <p>⚠️ <strong>Disclaimer:</strong> For educational purposes only. Consult healthcare professionals for medical advice.</p>
+    <p>📦 <strong>Model loaded from GitHub:</strong> yaswanth-nayana/Obesity</p>
 </div>
 """, unsafe_allow_html=True)
