@@ -3,7 +3,6 @@ import pandas as pd
 import pickle
 import requests
 import io
-import numpy as np
 
 # Set page configuration
 st.set_page_config(
@@ -115,9 +114,6 @@ with st.sidebar:
             # Show features if available
             if 'top_features' in st.session_state.model_data and st.session_state.model_data['top_features']:
                 st.info(f"**Features:** {len(st.session_state.model_data['top_features'])}")
-                with st.expander("View features"):
-                    for i, feature in enumerate(st.session_state.model_data['top_features'], 1):
-                        st.write(f"{i}. {feature}")
     else:
         st.error(f"❌ {st.session_state.model_message}")
         st.info("**Tried to load from:**")
@@ -284,97 +280,118 @@ else:
                     'MTRANS': mtrans_map[mtrans]
                 }
                 
-                # Get model's expected features - IMPORTANT: Use the exact order from training
-                # First, check if model has feature names
+                # Get model's expected features
                 if hasattr(model, 'feature_name_'):
-                    # LightGBM model
                     expected_features = list(model.feature_name_)
                 elif hasattr(model, 'feature_names_in_'):
-                    # scikit-learn model
                     expected_features = list(model.feature_names_in_)
                 elif top_features and len(top_features) > 0:
-                    # Use top_features from model package
                     expected_features = list(top_features)
                 else:
-                    # Fallback - try to match with input data keys
-                    expected_features = list(input_data.keys())
+                    # Use all original feature names
+                    expected_features = [
+                        'Gender', 'Age', 'Height', 'Weight', 'family_history_with_overweight',
+                        'FAVC', 'FCVC', 'NCP', 'CAEC', 'SMOKE', 'CH2O', 'SCC', 'FAF', 'TUE',
+                        'CALC', 'MTRANS'
+                    ]
                 
-                # DEBUG: Show what features we have
-                with st.expander("🔍 Debug Information"):
-                    st.write("**Input data keys:**", list(input_data.keys()))
-                    st.write("**Expected features:**", expected_features)
-                    st.write("**Number of expected features:**", len(expected_features))
-                    if scaler:
-                        st.write("**Scaler exists:** Yes")
-                        if hasattr(scaler, 'feature_names_in_'):
-                            st.write("**Scaler features:**", list(scaler.feature_names_in_))
-                    else:
-                        st.write("**Scaler exists:** No")
+                # Debug: Show what features we have and what model expects
+                st.info(f"**Input features prepared:** {len(input_data)}")
+                st.info(f"**Model expects features:** {len(expected_features)}")
                 
-                # Create a simple array for prediction - most reliable approach
-                # Build the feature array in the EXACT order the model expects
-                feature_array = []
-                
-                for feature in expected_features:
-                    if feature in input_data:
-                        feature_array.append(input_data[feature])
-                    else:
-                        # If feature is missing, use 0
-                        feature_array.append(0)
-                
-                # Convert to numpy array and reshape for prediction
-                feature_array = np.array(feature_array).reshape(1, -1)
-                
-                # DEBUG: Show the actual values being sent
-                with st.expander("🔍 Feature Values Sent"):
-                    for i, (feature, value) in enumerate(zip(expected_features, feature_array[0])):
-                        st.write(f"{i+1}. {feature}: {value}")
-                
-                # Try to scale if scaler exists
+                # Create DataFrame with the EXACT feature names the scaler was trained with
+                # First, check if scaler has feature names attribute
                 if scaler:
-                    try:
-                        # Check if scaler expects the same number of features
-                        if hasattr(scaler, 'n_features_in_'):
-                            if scaler.n_features_in_ == len(feature_array[0]):
-                                feature_array = scaler.transform(feature_array)
-                                st.success("✅ Features scaled successfully")
+                    # Try to get scaler's expected feature names
+                    if hasattr(scaler, 'feature_names_in_'):
+                        scaler_features = list(scaler.feature_names_in_)
+                        st.info(f"**Scaler expects:** {len(scaler_features)} features")
+                        
+                        # Create DataFrame with scaler's expected features
+                        df_data = {}
+                        for feature in scaler_features:
+                            if feature in input_data:
+                                df_data[feature] = [input_data[feature]]
                             else:
-                                st.warning(f"⚠️ Scaler expects {scaler.n_features_in_} features, but we have {len(feature_array[0])}. Using unscaled.")
+                                # If scaler expects a feature we don't have, use 0
+                                df_data[feature] = [0.0]
+                                st.warning(f"⚠️ Scaler expects '{feature}' but not in input. Using 0.")
+                        
+                        df_for_scaler = pd.DataFrame(df_data)
+                        df_for_scaler = df_for_scaler[scaler_features]  # Ensure correct order
+                        
+                        # Scale the data
+                        try:
+                            scaled_values = scaler.transform(df_for_scaler)
+                            st.success("✅ Data scaled successfully with scaler")
+                            
+                            # Now create DataFrame for model prediction
+                            df_data_model = {}
+                            for feature in expected_features:
+                                if feature in input_data:
+                                    df_data_model[feature] = [input_data[feature]]
+                                else:
+                                    df_data_model[feature] = [0]
+                            
+                            df_for_model = pd.DataFrame(df_data_model)
+                            df_for_model = df_for_model[expected_features]
+                            
+                            # Get the scaled values for the model features
+                            model_input = []
+                            for feature in expected_features:
+                                if feature in scaler_features:
+                                    idx = scaler_features.index(feature)
+                                    model_input.append(scaled_values[0][idx])
+                                else:
+                                    model_input.append(0)
+                            
+                            model_input = [model_input]
+                            
+                        except Exception as e:
+                            st.error(f"❌ Scaler transformation failed: {str(e)}")
+                            # Fallback to unscaled data
+                            df_data = {}
+                            for feature in expected_features:
+                                if feature in input_data:
+                                    df_data[feature] = [input_data[feature]]
+                                else:
+                                    df_data[feature] = [0]
+                            
+                            df_for_model = pd.DataFrame(df_data)
+                            df_for_model = df_for_model[expected_features]
+                            model_input = df_for_model.values
+                    else:
+                        # Scaler doesn't have feature_names_in_ attribute
+                        st.warning("⚠️ Scaler doesn't have feature names. Using unscaled data.")
+                        # Create DataFrame for model
+                        df_data = {}
+                        for feature in expected_features:
+                            if feature in input_data:
+                                df_data[feature] = [input_data[feature]]
+                            else:
+                                df_data[feature] = [0]
+                        
+                        df_for_model = pd.DataFrame(df_data)
+                        df_for_model = df_for_model[expected_features]
+                        model_input = df_for_model.values
+                else:
+                    # No scaler, just create DataFrame for model
+                    df_data = {}
+                    for feature in expected_features:
+                        if feature in input_data:
+                            df_data[feature] = [input_data[feature]]
                         else:
-                            # Try to transform anyway
-                            feature_array = scaler.transform(feature_array)
-                            st.success("✅ Features scaled successfully")
-                    except Exception as e:
-                        st.warning(f"⚠️ Scaling failed: {str(e)}. Using unscaled features.")
+                            df_data[feature] = [0]
+                    
+                    df_for_model = pd.DataFrame(df_data)
+                    df_for_model = df_for_model[expected_features]
+                    model_input = df_for_model.values
                 
                 # Make prediction
                 with st.spinner("Making prediction..."):
-                    try:
-                        prediction = model.predict(feature_array)[0]
-                        st.success(f"✅ Prediction made successfully")
-                    except Exception as e:
-                        st.error(f"❌ Prediction failed: {str(e)}")
-                        # Try with a simple default array
-                        default_array = np.zeros((1, len(expected_features)))
-                        prediction = model.predict(default_array)[0]
-                        st.warning("⚠️ Used default array for prediction")
-                
-                # DEBUG: Show raw prediction
-                with st.expander("🔍 Raw Prediction Info"):
-                    st.write(f"**Raw prediction value:** {prediction}")
-                    st.write(f"**Prediction type:** {type(prediction)}")
-                    if hasattr(model, 'predict_proba'):
-                        proba = model.predict_proba(feature_array)[0]
-                        st.write(f"**Prediction probabilities:**")
-                        for i, prob in enumerate(proba):
-                            st.write(f"  Class {i}: {prob:.4f}")
+                    prediction = model.predict(model_input)[0]
                 
                 # Decode prediction based on your value_counts
-                # Your value_counts show this order:
-                # Obesity_Type_III (0), Obesity_Type_II (1), Normal_Weight (2), 
-                # Obesity_Type_I (3), Insufficient_Weight (4), Overweight_Level_II (5), 
-                # Overweight_Level_I (6)
-                
                 obesity_labels = [
                     "Obesity_Type_III",       # Class 0
                     "Obesity_Type_II",        # Class 1
@@ -385,36 +402,24 @@ else:
                     "Overweight_Level_I"      # Class 6
                 ]
                 
-                # Handle prediction value
-                if isinstance(prediction, (int, np.integer)):
-                    prediction_int = int(prediction)
-                else:
-                    # Try to convert to int
-                    try:
-                        prediction_int = int(prediction)
-                    except:
-                        prediction_int = 5  # Default to Overweight_Level_II
-                
-                # Try to use label encoder if available
                 result = ""
                 if 'NObeyesdad' in label_encoders:
                     try:
-                        result = label_encoders['NObeyesdad'].inverse_transform([prediction_int])[0]
+                        result = label_encoders['NObeyesdad'].inverse_transform([prediction])[0]
                     except:
-                        if 0 <= prediction_int < len(obesity_labels):
-                            result = obesity_labels[prediction_int]
+                        if prediction < len(obesity_labels):
+                            result = obesity_labels[prediction]
                         else:
-                            result = f"Class {prediction_int}"
+                            result = f"Class {prediction}"
                 else:
-                    if 0 <= prediction_int < len(obesity_labels):
-                        result = obesity_labels[prediction_int]
+                    if prediction < len(obesity_labels):
+                        result = obesity_labels[prediction]
                     else:
-                        result = f"Class {prediction_int}"
+                        result = f"Class {prediction}"
                 
                 # Store result
                 st.session_state.prediction_result = result
                 st.session_state.prediction_made = True
-                st.session_state.last_prediction_value = prediction_int
                 
                 # Display result
                 prediction_colors = {
@@ -434,33 +439,17 @@ else:
                     <h3>🎯 Predicted Obesity Level</h3>
                     <h1 style="color: {color}; text-align: center; margin: 1rem 0;">{result}</h1>
                     <p style="text-align: center; color: #666;">
-                        Class: {prediction_int} | Raw value: {prediction}
+                        Prediction Class: {prediction}
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Show input summary
-                st.markdown('<h3>📋 Your Input Summary</h3>', unsafe_allow_html=True)
-                
-                summary_data = {
-                    "BMI": f"{bmi:.1f} ({'Underweight' if bmi < 18.5 else 'Normal' if bmi < 25 else 'Overweight' if bmi < 30 else 'Obesity'})",
-                    "Age": age,
-                    "Weight": f"{weight} kg",
-                    "Height": f"{height} m",
-                    "Physical Activity": f"{faf}/3",
-                    "Vegetable Intake": f"{fcvc}/3",
-                    "Family History": "Yes" if family_history == "yes" else "No"
-                }
-                
-                for key, value in summary_data.items():
-                    st.write(f"**{key}:** {value}")
-                
-                # Metrics visualization
+                # Metrics
                 st.markdown('<h3>📈 Key Health Factors</h3>', unsafe_allow_html=True)
                 
                 metrics = [
-                    ("Weight", weight / 100),  # Normalize to 100kg max
-                    ("Age", age / 100),        # Normalize to 100 years max
+                    ("Weight", weight / 150),
+                    ("Age", age / 80),
                     ("Physical Activity", faf / 3),
                     ("Vegetable Intake", fcvc / 3),
                     ("Water Intake", ch2o / 3)
@@ -547,12 +536,15 @@ else:
                 st.error(f"❌ Prediction error: {str(e)}")
                 
                 # Detailed debug information
-                with st.expander("🔧 Technical Details"):
-                    st.write("**Error type:**", type(e).__name__)
-                    st.write("**Full error:**", str(e))
-                    import traceback
-                    st.write("**Traceback:**")
-                    st.code(traceback.format_exc())
+                with st.expander("🔧 Debug Details"):
+                    st.write("**Error:**", str(e))
+                    st.write("**Model type:**", type(model).__name__)
+                    if scaler:
+                        st.write("**Scaler type:**", type(scaler).__name__)
+                        if hasattr(scaler, 'feature_names_in_'):
+                            st.write("**Scaler features:**", list(scaler.feature_names_in_))
+                    st.write("**Input data keys:**", list(input_data.keys()))
+                    st.write("**Expected features:**", expected_features)
         
         elif st.session_state.prediction_made:
             # Show previous prediction
@@ -577,7 +569,7 @@ else:
                 <h3>🎯 Previous Prediction</h3>
                 <h1 style="color: {color}; text-align: center; margin: 1rem 0;">{prediction_label}</h1>
                 <p style="text-align: center;">
-                    Class: {getattr(st.session_state, 'last_prediction_value', 'N/A')}
+                    Based on your previous input data.
                 </p>
             </div>
             """, unsafe_allow_html=True)
@@ -607,4 +599,3 @@ st.markdown("""
     <p>📦 <strong>Model loaded from GitHub:</strong> yaswanth-nayana/Obesity</p>
 </div>
 """, unsafe_allow_html=True)
-
