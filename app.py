@@ -238,7 +238,7 @@ else:
                     tue = st.slider("Technology Use (hours)", 0.0, 2.0, 0.5, 0.1)
                 
                 mtrans = st.selectbox("Transportation", ["Public_Transportation", "Automobile", "Walking", "Bike", "Motorbike"])
-            else:
+else:
                 # Default values for collapsed features
                 caec = "no"
                 calc = "no"
@@ -590,3 +590,4 @@ st.markdown("""
     <p>📦 <strong>Model loaded from GitHub:</strong> yaswanth-nayana/Obesity</p>
 </div>
 """, unsafe_allow_html=True)
+
