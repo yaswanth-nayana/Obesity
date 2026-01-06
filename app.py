@@ -6,7 +6,7 @@ import io
 
 # Set page configuration
 st.set_page_config(
-    page_title="Obesity Love Predictor",
+    page_title="Obesity Level Predictor",
     page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -214,191 +214,90 @@ else:
             
             faf = st.slider("Physical Activity", 0.0, 3.0, 1.0, 0.1)
             
-            # Add missing features
-            with st.expander("Additional Lifestyle Factors"):
-                col_g, col_h = st.columns(2)
-                with col_g:
-                    caec = st.selectbox("Eating Between Meals", ["no", "Sometimes", "Frequently", "Always"])
-                with col_h:
-                    calc = st.selectbox("Alcohol Consumption", ["no", "Sometimes", "Frequently", "Always"])
-                
-                col_i, col_j = st.columns(2)
-                with col_i:
-                    smoke = st.selectbox("Smoking", ["yes", "no"])
-                with col_j:
-                    scc = st.selectbox("Calorie Monitoring", ["yes", "no"])
-                
-                col_k, col_l = st.columns(2)
-                with col_k:
-                    ch2o = st.slider("Water Intake (L)", 0.5, 3.0, 1.5, 0.1)
-                with col_l:
-                    tue = st.slider("Technology Use (hours)", 0.0, 2.0, 0.5, 0.1)
-                
-                mtrans = st.selectbox("Transportation", ["Public_Transportation", "Automobile", "Walking", "Bike", "Motorbike"])
-            
-            
             submitted = st.form_submit_button("🔍 Predict Obesity Level", use_container_width=True)
     
     with col2:
         if submitted:
             st.markdown('<h2>📊 Prediction Results</h2>', unsafe_allow_html=True)
             
+            # Prepare input data
+            input_data = {
+                'Gender': 0 if gender == "Male" else 1,
+                'Age': age,
+                'Height': height,
+                'Weight': weight,
+                'family_history_with_overweight': 1 if family_history == "yes" else 0,
+                'FAVC': 1 if favc == "yes" else 0,
+                'FCVC': fcvc,
+                'NCP': ncp,
+                'FAF': faf
+            }
+            
+            # Add default values for missing features
+            default_features = {
+                'CAEC': 0, 'SMOKE': 0, 'CH2O': 1.5, 'SCC': 0, 
+                'TUE': 0.5, 'CALC': 0, 'MTRANS': 0
+            }
+            input_data.update(default_features)
+            
             try:
-                # Prepare input data with ALL features in correct order
-                # Use your training data order from value_counts
-                
-                # Encoding mappings
-                gender_map = {"Male": 0, "Female": 1}
-                yes_no_map = {"yes": 1, "no": 0}
-                caec_map = {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3}
-                calc_map = {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3}
-                mtrans_map = {
-                    "Public_Transportation": 0,
-                    "Automobile": 1,
-                    "Walking": 2,
-                    "Bike": 3,
-                    "Motorbike": 4
-                }
-                
-                # Create input dictionary with ALL 16 features
-                input_data = {
-                    'Gender': gender_map[gender],
-                    'Age': float(age),
-                    'Height': float(height),
-                    'Weight': float(weight),
-                    'family_history_with_overweight': yes_no_map[family_history],
-                    'FAVC': yes_no_map[favc],
-                    'FCVC': float(fcvc),
-                    'NCP': float(ncp),
-                    'CAEC': caec_map[caec],
-                    'SMOKE': yes_no_map[smoke],
-                    'CH2O': float(ch2o),
-                    'SCC': yes_no_map[scc],
-                    'FAF': float(faf),
-                    'TUE': float(tue),
-                    'CALC': calc_map[calc],
-                    'MTRANS': mtrans_map[mtrans]
-                }
-                
-                # Define the correct feature order (as per your training)
-                all_features = [
-                    'Gender', 'Age', 'Height', 'Weight', 'family_history_with_overweight',
-                    'FAVC', 'FCVC', 'NCP', 'CAEC', 'SMOKE', 'CH2O', 'SCC', 'FAF', 'TUE',
-                    'CALC', 'MTRANS'
-                ]
-                
-                # Determine which features to use
-                if top_features and len(top_features) > 0:
-                    # Use top features in the order they were during training
-                    selected_features = [f for f in top_features if f in all_features]
-                    if not selected_features:
-                        selected_features = all_features
-                else:
-                    selected_features = all_features
-                
-                # Create DataFrame with features in EXACT order
-                df = pd.DataFrame({feature: [input_data[feature]] for feature in selected_features})
-                
-                # Ensure correct column order
-                df = df[selected_features]
-                
-                # Debug: Show what we're sending
-                with st.expander("🔍 Debug Info"):
-                    st.write("**Selected Features:**", selected_features)
-                    st.write("**DataFrame Columns:**", list(df.columns))
-                    st.write("**Data Values:**", df.values[0])
+                # Create DataFrame
+                df = pd.DataFrame([input_data])
                 
                 # Scale if scaler exists
                 if scaler:
-                    try:
-                        df_scaled = scaler.transform(df)
-                    except Exception as e:
-                        st.warning(f"⚠️ Scaling error: {e}. Using unscaled data.")
-                        df_scaled = df.values
+                    df_scaled = scaler.transform(df)
                 else:
                     df_scaled = df.values
                 
+                # Select features if specified
+                if top_features and len(top_features) > 0:
+                    # Get available features
+                    available_features = [f for f in top_features if f in df.columns]
+                    if available_features:
+                        X = df_scaled[:, [list(df.columns).index(f) for f in available_features]]
+                    else:
+                        X = df_scaled
+                else:
+                    X = df_scaled
+                
                 # Make prediction
-                with st.spinner("Making prediction..."):
-                    prediction = model.predict(df_scaled)[0]
+                prediction = model.predict(X)[0]
                 
-                # DECODE PREDICTION BASED ON YOUR TRAINING DATA ORDER
-                # Your value_counts show this order:
-                # Obesity_Type_III (0), Obesity_Type_II (1), Normal_Weight (2), 
-                # Obesity_Type_I (3), Insufficient_Weight (4), Overweight_Level_II (5), 
-                # Overweight_Level_I (6)
-                
-                # Match the EXACT order from your value_counts
+                # Decode prediction
                 obesity_labels = [
-                    "Obesity_Type_III",       # Class 0
-                    "Obesity_Type_II",        # Class 1
-                    "Normal_Weight",          # Class 2
-                    "Obesity_Type_I",         # Class 3
-                    "Insufficient_Weight",    # Class 4
-                    "Overweight_Level_II",    # Class 5
-                    "Overweight_Level_I"      # Class 6
+                    "Insufficient_Weight", "Normal_Weight", "Overweight_Level_I",
+                    "Overweight_Level_II", "Obesity_Type_I", "Obesity_Type_II", "Obesity_Type_III"
                 ]
                 
-                # Try to use label encoder if available
-                result = ""
                 if 'NObeyesdad' in label_encoders:
                     try:
                         result = label_encoders['NObeyesdad'].inverse_transform([prediction])[0]
                     except:
-                        # Use our custom mapping
-                        if prediction < len(obesity_labels):
-                            result = obesity_labels[prediction]
-                        else:
-                            result = f"Class {prediction}"
+                        result = obesity_labels[prediction] if prediction < len(obesity_labels) else f"Class {prediction}"
                 else:
-                    # Use our custom mapping based on your value_counts
-                    if prediction < len(obesity_labels):
-                        result = obesity_labels[prediction]
-                    else:
-                        result = f"Class {prediction}"
+                    result = obesity_labels[prediction] if prediction < len(obesity_labels) else f"Class {prediction}"
                 
-                # Store the prediction result
-                st.session_state.prediction_result = result
-                st.session_state.prediction_made = True
-                
-                # Display result with color coding
-                prediction_colors = {
-                    "Insufficient_Weight": "#3498db",      # Blue
-                    "Normal_Weight": "#2ecc71",           # Green
-                    "Overweight_Level_I": "#f1c40f",      # Yellow
-                    "Overweight_Level_II": "#e67e22",     # Orange
-                    "Obesity_Type_I": "#e74c3c",         # Red
-                    "Obesity_Type_II": "#c0392b",        # Dark Red
-                    "Obesity_Type_III": "#7d3c98"        # Purple
-                }
-                
-                color = prediction_colors.get(result, "#1E3A8A")
-                
+                # Display result
                 st.markdown(f"""
-                <div class="prediction-box" style="border-left-color: {color};">
+                <div class="prediction-box">
                     <h3>🎯 Predicted Obesity Level</h3>
-                    <h1 style="color: {color}; text-align: center; margin: 1rem 0;">{result}</h1>
-                    <p style="text-align: center; color: #666;">
-                        Prediction: Class {prediction}
-                    </p>
+                    <h1 style="text-align: center; color: #1E3A8A;">{result}</h1>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Simple metrics visualization
-                st.markdown('<h3>📈 Key Health Factors</h3>', unsafe_allow_html=True)
+                st.markdown('<h3>📈 Key Factors</h3>', unsafe_allow_html=True)
                 
                 metrics = [
                     ("Weight", weight / 150),
                     ("Age", age / 80),
                     ("Physical Activity", faf / 3),
-                    ("Vegetable Intake", fcvc / 3),
-                    ("Water Intake", ch2o / 3)
+                    ("Vegetable Intake", fcvc / 3)
                 ]
                 
                 for name, value in metrics:
                     percent = min(int(value * 100), 100)
-                    bar_color = "#2ecc71" if percent < 70 else "#f39c12" if percent < 90 else "#e74c3c"
-                    
                     st.markdown(f"""
                     <div style="margin: 0.5rem 0;">
                         <div style="display: flex; justify-content: space-between;">
@@ -406,130 +305,36 @@ else:
                             <span>{percent}%</span>
                         </div>
                         <div class="feature-bar">
-                            <div class="feature-fill" style="width: {percent}%; background-color: {bar_color};"></div>
+                            <div class="feature-fill" style="width: {percent}%;"></div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
                 
-                # Simple recommendations based on your class order
-                st.markdown('<h3>📋 Personalized Recommendations</h3>', unsafe_allow_html=True)
+                # Simple recommendations
+                st.markdown('<h3>📋 Recommendations</h3>', unsafe_allow_html=True)
                 
-                recommendations = {
-                    "Insufficient_Weight": [
-                        "💪 Include strength training 3 times weekly",
-                        "🍽️ Eat 5-6 smaller meals throughout day",
-                        "🥛 Add protein shakes or supplements",
-                        "👨‍⚕️ Consult dietitian for meal plan"
-                    ],
-                    "Normal_Weight": [
-                        "🏃 Maintain 150 mins exercise weekly",
-                        "🥗 Continue balanced diet with variety",
-                        "⚖️ Monitor weight monthly",
-                        "💧 Drink 2+ liters water daily"
-                    ],
-                    "Overweight_Level_I": [
-                        "🚶 Increase daily steps to 10,000",
-                        "🥦 Replace processed foods with vegetables",
-                        "⏰ Avoid eating 2 hours before bedtime",
-                        "📱 Use fitness app to track activity"
-                    ],
-                    "Overweight_Level_II": [
-                        "🏋️ Add 30 mins cardio 5 days/week",
-                        "📊 Track calorie intake with food diary",
-                        "👨‍⚕️ Schedule check-up with doctor",
-                        "🍎 Focus on whole foods, reduce sugar"
-                    ],
-                    "Obesity_Type_I": [
-                        "🏥 Consult doctor for health plan",
-                        "🚴 Aim for 60+ mins daily activity",
-                        "👨‍🍳 Work with registered dietitian",
-                        "🧘 Consider stress management"
-                    ],
-                    "Obesity_Type_II": [
-                        "⚠️ Immediate medical consultation",
-                        "📋 Structured weight management program",
-                        "🩺 Regular health monitoring",
-                        "💊 Discuss medication options"
-                    ],
-                    "Obesity_Type_III": [
-                        "🆘 Urgent medical attention required",
-                        "🏨 Multidisciplinary approach needed",
-                        "🔍 Surgical options evaluation",
-                        "👨‍⚕️ Close medical supervision crucial"
-                    ]
-                }
+                if "Insufficient" in result:
+                    st.info("1. Increase calorie intake with healthy foods\n2. Include strength training\n3. Eat regular meals")
+                elif "Normal" in result:
+                    st.success("1. Maintain current lifestyle\n2. Regular exercise\n3. Balanced diet")
+                elif "Overweight" in result:
+                    st.warning("1. Increase physical activity\n2. Reduce portion sizes\n3. More vegetables")
+                else:
+                    st.error("1. Consult healthcare professional\n2. Structured exercise plan\n3. Dietary counseling")
                 
-                rec_list = recommendations.get(result, [
-                    "Maintain balanced diet",
-                    "Stay physically active",
-                    "Consult healthcare professional"
-                ])
-                
-                for i, rec in enumerate(rec_list, 1):
-                    st.info(f"{i}. {rec}")
-                
-                if st.button("🔄 Make Another Prediction", use_container_width=True):
+                if st.button("🔄 New Prediction", use_container_width=True):
                     st.session_state.prediction_made = False
                     st.rerun()
                     
             except Exception as e:
-                st.error(f"❌ Prediction error: {str(e)}")
-                
-                # Detailed error information
-                with st.expander("🔧 Technical Details"):
-                    st.write("**Error type:**", type(e).__name__)
-                    st.write("**Full error:**", str(e))
-                    
-                    if 'df' in locals():
-                        st.write("**DataFrame shape:**", df.shape)
-                        st.write("**DataFrame columns:**", list(df.columns))
-                    
-                    if top_features:
-                        st.write("**Top features from model:**", top_features)
-        
-        elif st.session_state.prediction_made:
-            # Show previous prediction
-            st.markdown('<h2>📊 Previous Prediction</h2>', unsafe_allow_html=True)
-            
-            prediction_label = st.session_state.prediction_result
-            
-            # Display previous prediction
-            prediction_colors = {
-                "Insufficient_Weight": "#3498db",
-                "Normal_Weight": "#2ecc71",
-                "Overweight_Level_I": "#f1c40f",
-                "Overweight_Level_II": "#e67e22",
-                "Obesity_Type_I": "#e74c3c",
-                "Obesity_Type_II": "#c0392b",
-                "Obesity_Type_III": "#7d3c98"
-            }
-            
-            color = prediction_colors.get(prediction_label, "#1E3A8A")
-            
-            st.markdown(f"""
-            <div class="prediction-box" style="border-left-color: {color};">
-                <h3>🎯 Previous Prediction</h3>
-                <h1 style="color: {color}; text-align: center; margin: 1rem 0;">{prediction_label}</h1>
-                <p style="text-align: center;">
-                    Based on your previous input data.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button("🔄 Make New Prediction", use_container_width=True):
-                st.session_state.prediction_made = False
-                st.rerun()
+                st.error(f"Prediction error: {str(e)}")
         
         else:
             # Placeholder before prediction
             st.markdown("""
             <div style="text-align: center; padding: 4rem 2rem; background-color: #F8F9FA; border-radius: 10px;">
-                <div style="font-size: 4rem; margin-bottom: 1rem;">⚖️</div>
-                <h3 style="color: #6B7280;">Ready for Prediction</h3>
-                <p>Fill out the form and click <strong>"Predict Obesity Level"</strong></p>
-                <p style="color: #10B981; margin-top: 1rem;">
-                    <strong>✓ Model loaded successfully</strong>
-                </p>
+                <h3 style="color: #6B7280;">👈 Enter Information</h3>
+                <p>Fill out the form and click "Predict" to see results.</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -541,4 +346,3 @@ st.markdown("""
     <p>📦 <strong>Model loaded from GitHub:</strong> yaswanth-nayana/Obesity</p>
 </div>
 """, unsafe_allow_html=True)
-
