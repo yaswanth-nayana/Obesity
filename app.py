@@ -522,7 +522,8 @@ else:
                     if 'df' in locals():
                         st.write("**DataFrame shape:**", df.shape)
                         st.write("**DataFrame columns:**", list(df.columns))
-                        st.write("**Expected features:**", list(expected_features) if 'expected_features' in locals() else "N/A")
+                        if 'expected_features' in locals():
+                            st.write("**Expected features:**", list(expected_features))
                     
                     # Show model attributes for debugging
                     st.write("**Model Attributes:**")
