@@ -1,4 +1,4 @@
-\import streamlit as st
+import streamlit as st
 import pandas as pd
 import pickle
 import requests
@@ -607,3 +607,4 @@ st.markdown("""
     <p>📦 <strong>Model loaded from GitHub:</strong> yaswanth-nayana/Obesity</p>
 </div>
 """, unsafe_allow_html=True)
+
