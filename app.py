@@ -247,149 +247,127 @@ else:
             st.markdown('<h2>📊 Prediction Results</h2>', unsafe_allow_html=True)
             
             try:
-                # Prepare input data
-                gender_map = {"Male": 0, "Female": 1}
-                yes_no_map = {"yes": 1, "no": 0}
-                caec_map = {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3}
-                calc_map = {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3}
-                mtrans_map = {
-                    "Public_Transportation": 0,
-                    "Automobile": 1,
-                    "Walking": 2,
-                    "Bike": 3,
-                    "Motorbike": 4
-                }
-                
-                # Create input dictionary with ALL original feature names
-                input_data = {
-                    'Gender': gender_map[gender],
+                # Prepare raw input first, then encode with saved encoders when available.
+                raw_input_data = {
+                    'Gender': gender,
                     'Age': float(age),
                     'Height': float(height),
                     'Weight': float(weight),
-                    'family_history_with_overweight': yes_no_map[family_history],
-                    'FAVC': yes_no_map[favc],
+                    'family_history_with_overweight': family_history,
+                    'FAVC': favc,
                     'FCVC': float(fcvc),
                     'NCP': float(ncp),
-                    'CAEC': caec_map[caec],
-                    'SMOKE': yes_no_map[smoke],
+                    'CAEC': caec,
+                    'SMOKE': smoke,
                     'CH2O': float(ch2o),
-                    'SCC': yes_no_map[scc],
+                    'SCC': scc,
                     'FAF': float(faf),
                     'TUE': float(tue),
-                    'CALC': calc_map[calc],
-                    'MTRANS': mtrans_map[mtrans]
+                    'CALC': calc,
+                    'MTRANS': mtrans
                 }
-                
-                # Get model's expected features
-                if hasattr(model, 'feature_name_'):
-                    expected_features = list(model.feature_name_)
-                elif hasattr(model, 'feature_names_in_'):
-                    expected_features = list(model.feature_names_in_)
-                elif top_features and len(top_features) > 0:
-                    expected_features = list(top_features)
-                else:
-                    # Use all original feature names
-                    expected_features = [
-                        'Gender', 'Age', 'Height', 'Weight', 'family_history_with_overweight',
-                        'FAVC', 'FCVC', 'NCP', 'CAEC', 'SMOKE', 'CH2O', 'SCC', 'FAF', 'TUE',
-                        'CALC', 'MTRANS'
-                    ]
-                
-                # Debug: Show what features we have and what model expects
-                st.info(f"**Input features prepared:** {len(input_data)}")
-                st.info(f"**Model expects features:** {len(expected_features)}")
-                
-                # Create DataFrame with the EXACT feature names the scaler was trained with
-                # First, check if scaler has feature names attribute
-                if scaler:
-                    # Try to get scaler's expected feature names
-                    if hasattr(scaler, 'feature_names_in_'):
-                        scaler_features = list(scaler.feature_names_in_)
-                        st.info(f"**Scaler expects:** {len(scaler_features)} features")
-                        
-                        # Create DataFrame with scaler's expected features
-                        df_data = {}
-                        for feature in scaler_features:
-                            if feature in input_data:
-                                df_data[feature] = [input_data[feature]]
-                            else:
-                                # If scaler expects a feature we don't have, use 0
-                                df_data[feature] = [0.0]
-                                st.warning(f"⚠️ Scaler expects '{feature}' but not in input. Using 0.")
-                        
-                        df_for_scaler = pd.DataFrame(df_data)
-                        df_for_scaler = df_for_scaler[scaler_features]  # Ensure correct order
-                        
-                        # Scale the data
+
+                manual_maps = {
+                    "Gender": {"Male": 0, "Female": 1},
+                    "family_history_with_overweight": {"yes": 1, "no": 0},
+                    "FAVC": {"yes": 1, "no": 0},
+                    "CAEC": {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3},
+                    "SMOKE": {"yes": 1, "no": 0},
+                    "SCC": {"yes": 1, "no": 0},
+                    "CALC": {"no": 0, "Sometimes": 1, "Frequently": 2, "Always": 3},
+                    "MTRANS": {
+                        "Public_Transportation": 0,
+                        "Automobile": 1,
+                        "Walking": 2,
+                        "Bike": 3,
+                        "Motorbike": 4
+                    }
+                }
+
+                input_data = {}
+                for feature, value in raw_input_data.items():
+                    if feature in label_encoders:
                         try:
-                            scaled_values = scaler.transform(df_for_scaler)
-                            st.success("✅ Data scaled successfully with scaler")
-                            
-                            # Now create DataFrame for model prediction
-                            df_data_model = {}
-                            for feature in expected_features:
-                                if feature in input_data:
-                                    df_data_model[feature] = [input_data[feature]]
-                                else:
-                                    df_data_model[feature] = [0]
-                            
-                            df_for_model = pd.DataFrame(df_data_model)
-                            df_for_model = df_for_model[expected_features]
-                            
-                            # Get the scaled values for the model features
-                            model_input = []
-                            for feature in expected_features:
-                                if feature in scaler_features:
-                                    idx = scaler_features.index(feature)
-                                    model_input.append(scaled_values[0][idx])
-                                else:
-                                    model_input.append(0)
-                            
-                            model_input = [model_input]
-                            
-                        except Exception as e:
-                            st.error(f"❌ Scaler transformation failed: {str(e)}")
-                            # Fallback to unscaled data
-                            df_data = {}
-                            for feature in expected_features:
-                                if feature in input_data:
-                                    df_data[feature] = [input_data[feature]]
-                                else:
-                                    df_data[feature] = [0]
-                            
-                            df_for_model = pd.DataFrame(df_data)
-                            df_for_model = df_for_model[expected_features]
-                            model_input = df_for_model.values
+                            input_data[feature] = float(label_encoders[feature].transform([value])[0])
+                            continue
+                        except Exception:
+                            pass
+
+                    if feature in manual_maps:
+                        input_data[feature] = float(manual_maps[feature][value])
                     else:
-                        # Scaler doesn't have feature_names_in_ attribute
-                        st.warning("⚠️ Scaler doesn't have feature names. Using unscaled data.")
-                        # Create DataFrame for model
-                        df_data = {}
-                        for feature in expected_features:
-                            if feature in input_data:
-                                df_data[feature] = [input_data[feature]]
-                            else:
-                                df_data[feature] = [0]
-                        
-                        df_for_model = pd.DataFrame(df_data)
-                        df_for_model = df_for_model[expected_features]
-                        model_input = df_for_model.values
+                        input_data[feature] = float(value)
+
+                # Resolve model feature space separately from scaler feature space.
+                raw_model_features = []
+                if hasattr(model, 'feature_name_') and len(getattr(model, 'feature_name_', [])) > 0:
+                    raw_model_features = list(model.feature_name_)
+                elif hasattr(model, 'feature_names_in_'):
+                    raw_model_features = list(model.feature_names_in_)
+
+                # LightGBM can store generic names like Column_0..Column_N.
+                uses_generic_lgbm_names = (
+                    len(raw_model_features) > 0 and
+                    all(str(name).startswith("Column_") for name in raw_model_features)
+                )
+
+                if top_features and len(top_features) > 0 and (
+                    uses_generic_lgbm_names or len(raw_model_features) == 0
+                ):
+                    model_features = list(top_features)
+                elif len(raw_model_features) > 0:
+                    model_features = raw_model_features
                 else:
-                    # No scaler, just create DataFrame for model
-                    df_data = {}
-                    for feature in expected_features:
-                        if feature in input_data:
-                            df_data[feature] = [input_data[feature]]
-                        else:
-                            df_data[feature] = [0]
-                    
-                    df_for_model = pd.DataFrame(df_data)
-                    df_for_model = df_for_model[expected_features]
-                    model_input = df_for_model.values
-                
+                    model_features = list(input_data.keys())
+
+                if scaler and hasattr(scaler, 'feature_names_in_'):
+                    scaler_features = list(scaler.feature_names_in_)
+                else:
+                    scaler_features = list(model_features)
+
+                st.info(f"**Input features prepared:** {len(input_data)}")
+                st.info(f"**Scaler expects features:** {len(scaler_features)}")
+                st.info(f"**Model expects features:** {len(model_features)}")
+
+                missing_scaler_features = [f for f in scaler_features if f not in input_data]
+                missing_model_features = [f for f in model_features if f not in input_data]
+                if missing_scaler_features:
+                    st.warning(f"Missing {len(missing_scaler_features)} scaler features; using 0 for those fields.")
+                if missing_model_features:
+                    st.warning(f"Missing {len(missing_model_features)} model features; using 0 for those fields.")
+
+                # Step 1: Build scaler input (16 features for your current artifacts).
+                scaler_df = pd.DataFrame(
+                    {feature: [input_data.get(feature, 0.0)] for feature in scaler_features},
+                    columns=scaler_features
+                )
+
+                if scaler:
+                    try:
+                        scaled_values = scaler.transform(scaler_df)
+                        scaled_df = pd.DataFrame(scaled_values, columns=scaler_features)
+                        st.success("Data scaled successfully with scaler")
+                    except Exception as e:
+                        st.error(f"Scaler transformation failed: {str(e)}")
+                        scaled_df = scaler_df.copy()
+                else:
+                    scaled_df = scaler_df.copy()
+
+                # Step 2: Select the exact model feature set (8 features for your current model).
+                model_df = pd.DataFrame(
+                    {feature: [input_data.get(feature, 0.0)] for feature in model_features},
+                    columns=model_features
+                )
+                for feature in model_features:
+                    if feature in scaled_df.columns:
+                        model_df[feature] = scaled_df[feature].values
+
+                model_input = model_df.values
                 # Make prediction
                 with st.spinner("Making prediction..."):
                     prediction = model.predict(model_input)[0]
+                if hasattr(prediction, "item"):
+                    prediction = prediction.item()
                 
                 # Decode prediction based on your value_counts
                 obesity_labels = [
@@ -403,19 +381,23 @@ else:
                 ]
                 
                 result = ""
-                if 'NObeyesdad' in label_encoders:
+                if isinstance(prediction, str):
+                    result = prediction
+                elif 'NObeyesdad' in label_encoders:
                     try:
                         result = label_encoders['NObeyesdad'].inverse_transform([prediction])[0]
                     except:
-                        if prediction < len(obesity_labels):
-                            result = obesity_labels[prediction]
+                        pred_idx = int(prediction)
+                        if pred_idx < len(obesity_labels):
+                            result = obesity_labels[pred_idx]
                         else:
-                            result = f"Class {prediction}"
+                            result = f"Class {pred_idx}"
                 else:
-                    if prediction < len(obesity_labels):
-                        result = obesity_labels[prediction]
+                    pred_idx = int(prediction)
+                    if pred_idx < len(obesity_labels):
+                        result = obesity_labels[pred_idx]
                     else:
-                        result = f"Class {prediction}"
+                        result = f"Class {pred_idx}"
                 
                 # Store result
                 st.session_state.prediction_result = result
