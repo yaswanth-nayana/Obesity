@@ -68,6 +68,72 @@ def load_model_from_github(model_url):
     except Exception as e:
         return None, False, f"Error loading from GitHub: {str(e)}"
 
+
+def get_bmi_target_class(bmi):
+    """Return the target class that matches the BMI ranges used in the dataset."""
+    if bmi < 18.5:
+        return "Insufficient_Weight", "BMI < 18.5 - underweight individuals"
+    if bmi < 25.0:
+        return "Normal_Weight", "BMI 18.5-24.9 - healthy weight range"
+    if bmi < 27.5:
+        return "Overweight_Level_I", "BMI 25.0-27.4 - mild overweight"
+    if bmi < 30.0:
+        return "Overweight_Level_II", "BMI 27.5-29.9 - moderate overweight"
+    if bmi < 35.0:
+        return "Obesity_Type_I", "BMI 30.0-34.9 - Class I obesity"
+    if bmi < 40.0:
+        return "Obesity_Type_II", "BMI 35.0-39.9 - Class II obesity (severe)"
+    return "Obesity_Type_III", "BMI >= 40.0 - Class III obesity"
+
+
+def get_lifestyle_case(favc, fcvc, ncp, caec, calc, scc, faf, ch2o, tue, mtrans):
+    """Summarize dietary and physical-activity indicators used with the BMI class."""
+    diet_flags = []
+    activity_flags = []
+
+    if favc == "yes":
+        diet_flags.append("frequent high-calorie food")
+    if fcvc < 2.0:
+        diet_flags.append("low vegetable intake")
+    if ncp > 3.0:
+        diet_flags.append("more than 3 main meals")
+    if caec in ["Frequently", "Always"]:
+        diet_flags.append("frequent eating between meals")
+    if calc in ["Frequently", "Always"]:
+        diet_flags.append("frequent alcohol consumption")
+    if scc == "no":
+        diet_flags.append("no calorie monitoring")
+    if ch2o < 1.5:
+        diet_flags.append("low water intake")
+
+    if faf < 1.0:
+        activity_flags.append("low physical activity")
+    if tue > 1.5:
+        activity_flags.append("high technology/sedentary time")
+    if mtrans in ["Automobile", "Motorbike"]:
+        activity_flags.append("motorized transportation")
+
+    diet_score = len(diet_flags)
+    activity_score = len(activity_flags)
+    total_score = diet_score + activity_score
+
+    if total_score >= 5:
+        case = "High lifestyle risk"
+    elif total_score >= 3:
+        case = "Moderate lifestyle risk"
+    elif total_score >= 1:
+        case = "Low lifestyle risk"
+    else:
+        case = "Healthy lifestyle indicators"
+
+    return {
+        "case": case,
+        "diet_score": diet_score,
+        "activity_score": activity_score,
+        "diet_flags": diet_flags or ["diet indicators are favorable"],
+        "activity_flags": activity_flags or ["activity indicators are favorable"]
+    }
+
 # Initialize session state
 if 'model_data' not in st.session_state:
     # Your GitHub model URLs
@@ -197,11 +263,13 @@ else:
             
             # Calculate BMI
             bmi = weight / (height ** 2)
+            bmi_target, bmi_description = get_bmi_target_class(bmi)
             st.markdown(f"""
             <div class="metric-card">
                 <h4>Your BMI</h4>
                 <h2>{bmi:.1f}</h2>
-                <p><strong>Category:</strong> {'Underweight' if bmi < 18.5 else 'Normal' if bmi < 25 else 'Overweight' if bmi < 30 else 'Obesity'}</p>
+                <p><strong>Target Class:</strong> {bmi_target}</p>
+                <p><strong>Range:</strong> {bmi_description}</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -398,9 +466,23 @@ else:
                         result = obesity_labels[pred_idx]
                     else:
                         result = f"Class {pred_idx}"
+
+                model_result = result
+                bmi_result, bmi_description = get_bmi_target_class(bmi)
+                lifestyle_case = get_lifestyle_case(
+                    favc, fcvc, ncp, caec, calc, scc, faf, ch2o, tue, mtrans
+                )
+                result = bmi_result
                 
                 # Store result
                 st.session_state.prediction_result = result
+                st.session_state.prediction_details = {
+                    "bmi": bmi,
+                    "bmi_description": bmi_description,
+                    "model_result": model_result,
+                    "raw_prediction": prediction,
+                    "lifestyle_case": lifestyle_case
+                }
                 st.session_state.prediction_made = True
                 
                 # Display result
@@ -421,10 +503,29 @@ else:
                     <h3>🎯 Predicted Obesity Level</h3>
                     <h1 style="color: {color}; text-align: center; margin: 1rem 0;">{result}</h1>
                     <p style="text-align: center; color: #666;">
-                        Prediction Class: {prediction}
+                        {bmi_description}
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
+
+                st.info(f"**Model output using dietary/activity inputs:** {model_result} (raw class: {prediction})")
+                if model_result != result:
+                    st.warning(
+                        "The ML model output differs from the BMI target class. "
+                        "The main class above follows the BMI ranges from your target-variable table."
+                    )
+
+                st.markdown('<h3>Dietary and Physical Activity Case</h3>', unsafe_allow_html=True)
+                case_col1, case_col2 = st.columns(2)
+                with case_col1:
+                    st.write(f"**Dietary score:** {lifestyle_case['diet_score']}")
+                    for flag in lifestyle_case["diet_flags"]:
+                        st.write(f"- {flag}")
+                with case_col2:
+                    st.write(f"**Physical activity score:** {lifestyle_case['activity_score']}")
+                    for flag in lifestyle_case["activity_flags"]:
+                        st.write(f"- {flag}")
+                st.info(f"**Combined case:** {lifestyle_case['case']}")
                 
                 # Metrics
                 st.markdown('<h3>📈 Key Health Factors</h3>', unsafe_allow_html=True)
@@ -526,7 +627,7 @@ else:
                         if hasattr(scaler, 'feature_names_in_'):
                             st.write("**Scaler features:**", list(scaler.feature_names_in_))
                     st.write("**Input data keys:**", list(input_data.keys()))
-                    st.write("**Expected features:**", expected_features)
+                    st.write("**Model features:**", model_features if 'model_features' in locals() else "Not resolved")
         
         elif st.session_state.prediction_made:
             # Show previous prediction
